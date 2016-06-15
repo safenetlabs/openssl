@@ -601,7 +601,7 @@ func TestStdlibLotsOfConns(t *testing.T) {
 		})
 }
 
-func TestOpenSSLLotsOfConns(t *testing.T) {
+func xTestOpenSSLLotsOfConns(t *testing.T) {
 	ctx, err := NewCtx()
 	if err != nil {
 		t.Fatal(err)
