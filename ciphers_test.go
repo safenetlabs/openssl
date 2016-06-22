@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// +build !darwin
+// +build !darwin brew
 
 package openssl
 
@@ -303,5 +303,81 @@ func TestNonAuthenticatedEncryption(t *testing.T) {
 	}
 	plainOutput += string(plainbytes)
 
+	checkEqual(t, []byte(plainOutput), plaintext1+plaintext2)
+}
+
+func TestNonAuthenticatedEncryptionAndReturnWorkingIV(t *testing.T) {
+	key := []byte("never gonna give you up, never g")
+	iv := []byte("onna let you dow")
+	plaintext1 := "The quick brown fox jumps over t"
+	plaintext2 := "he lazy dog"
+	var ciphertext []byte
+	
+	cipher, err := GetCipherByName("aes-256-cbc")
+	if err != nil {
+		t.Fatal("Could not get cipher: ", err)
+	}
+
+	eCtx, err := NewEncryptionCipherCtx(cipher, nil, key, iv)
+	//eCtx.SetPadding(0)
+	if err != nil {
+		t.Fatal("Could not create encryption context: ", err)
+	}
+	cipherbytes1, err := eCtx.EncryptUpdate([]byte(plaintext1))
+	if err != nil {
+		t.Fatal("EncryptUpdate(plaintext1) failure: ", err)
+	}
+	ciphertext = append(ciphertext, cipherbytes1...)
+	cipherbytes1, wiv, err := eCtx.EncryptFinalEx()
+	if err != nil {
+		t.Fatal("EncryptFinal() failure: ", err)
+	}	
+	ciphertext = append(ciphertext, cipherbytes1...)
+	
+	// Encrypt next block
+	eCtx2, err := NewEncryptionCipherCtx(cipher, nil, key, wiv)
+	//eCtx2.SetPadding(0)
+	cipherbytes2, err := eCtx2.EncryptUpdate([]byte(plaintext2))
+	if err != nil {
+		t.Fatal("EncryptUpdate(plaintext2) failure: ", err)
+	}
+	ciphertext = append(ciphertext, cipherbytes2...)
+	cipherbytes2, err = eCtx2.EncryptFinal()
+	if err != nil {
+		t.Fatal("EncryptFinal() failure: ", err)
+	}
+	ciphertext = append(ciphertext, cipherbytes2...)
+	
+	// Decrypt
+	dCtx, err := NewDecryptionCipherCtx(cipher, nil, key, iv)
+	if err != nil {
+		t.Fatal("Could not create decryption context: ", err)
+	}
+	//dCtx.SetPadding(0)
+	// If padding is on, 
+	plainbytes1, err := dCtx.DecryptUpdate(ciphertext[:48])
+	if err != nil {
+		t.Fatal("DecryptUpdate(ciphertext part 1) failure: ", err)
+	}
+	plainOutput := string(plainbytes1)
+	plainbytes1, wiv, err = dCtx.DecryptFinalEx()
+	if err != nil {
+		t.Fatal("DecryptFinal() failure: ", err)
+	}
+	plainOutput += string(plainbytes1)
+	
+	// Decrypt next block
+	dCtx2, err := NewDecryptionCipherCtx(cipher, nil, key, wiv)
+	//dCtx2.SetPadding(0)
+	plainbytes2, err := dCtx2.DecryptUpdate(ciphertext[48:])
+	if err != nil {
+		t.Fatal("DecryptUpdate(ciphertext part 2) failure: ", err)
+	}
+	plainOutput += string(plainbytes2)
+	plainbytes2, err = dCtx2.DecryptFinal()
+	if err != nil {
+		t.Fatal("EncryptFinal() failure: ", err)
+	}
+	plainOutput += string(plainbytes2)
 	checkEqual(t, []byte(plainOutput), plaintext1+plaintext2)
 }
