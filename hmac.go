@@ -100,7 +100,7 @@ func (ctx *hmacCtx) mdContext() *C.EVP_MD {
 
 func (ctx *hmacCtx) HmacUpdate(input []byte) error {
 	if 1 != C.HMAC_Update(ctx.hmacContext(), (*C.uchar)(&input[0]), C.size_t(len(input))) {
-		return fmt.Errorf("failed hmac update [result %d]", res)
+		return fmt.Errorf("failed hmac update")
 	}
 
 	return nil
@@ -110,7 +110,7 @@ func (ctx *hmacCtx) HmacFinal() ([]byte, error) {
 	outbuf := make([]byte, C.EVP_MD_size_not_a_macro(ctx.mdContext()))
 	outlen := C.uint(len(outbuf))
 	if 1 != C.HMAC_Final(ctx.hmacContext(), (*C.uchar)(&outbuf[0]), &outlen) {
-		return nil, fmt.Errorf("failed hmac final [result %d]", res)
+		return nil, fmt.Errorf("failed hmac final")
 	}
 	// Force garbage collection
 	runtime.GC()
