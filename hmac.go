@@ -20,15 +20,13 @@ package openssl
 #include <openssl/engine.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
-
-int EVP_MD_size_not_a_macro(EVP_MD *md) {
-	return EVP_MD_size(md);
-}
+#include <openssl/sha.h>
 */
 import "C"
 
 import (
 	"fmt"
+	"reflect"
 	"runtime"
 	"unsafe"
 )
@@ -45,6 +43,7 @@ func newHmacCtx() (*hmacCtxSt, error) {
 	if hctx == nil {
 		return nil, fmt.Errorf("failed to allocate hmac context")
 	}
+	hctx.md_ctx.md_data = nil
 	ctx := &hmacCtxSt{hctx}
 	runtime.SetFinalizer(ctx, func(ctx *hmacCtxSt) {
 		//fmt.Println("Freeing hmac context")
@@ -80,34 +79,90 @@ func hmacInit(name string, e *Engine, key []byte) (*hmacCtx, error) {
 }
 
 type HmacCtx interface {
-	HmacUpdate(input []byte) error
+	HmacUpdate(data []byte) error
+	HmacUpdateEx(data, pmd []byte) ([]byte, error)
 	HmacFinal() ([]byte, error)
 	hmacContext() *C.HMAC_CTX
-	mdContext() *C.EVP_MD
-}
-
-func HmacInit(d string, e *Engine, key []byte) (HmacCtx, error) {
-	return hmacInit(d, e, key)
+	evpMd() *C.EVP_MD
+	evpMdCtx() *C.EVP_MD_CTX
+	mdData() []byte
+	setMdData(pmd []byte)
+	getMdCtxSize() int
 }
 
 func (ctx *hmacCtx) hmacContext() *C.HMAC_CTX {
 	return ctx.hmacCtxSt.hCtx
 }
 
-func (ctx *hmacCtx) mdContext() *C.EVP_MD {
+func (ctx *hmacCtx) evpMd() *C.EVP_MD {
 	return ctx.hmacCtxSt.hCtx.md
 }
 
-func (ctx *hmacCtx) HmacUpdate(input []byte) error {
-	if 1 != C.HMAC_Update(ctx.hmacContext(), (*C.uchar)(&input[0]), C.size_t(len(input))) {
+func (ctx *hmacCtx) evpMdCtx() *C.EVP_MD_CTX {
+	return &ctx.hmacCtxSt.hCtx.md_ctx
+}
+
+func (ctx *hmacCtx) getMdCtxSize() int {
+	var mdCtxSize uintptr
+	mdSize := C.EVP_MD_size(ctx.evpMd())
+	if mdSize == C.SHA_DIGEST_LENGTH {
+		var sha_ctx C.SHA_CTX
+		mdCtxSize = unsafe.Sizeof(sha_ctx)
+	} else if mdSize == C.SHA256_DIGEST_LENGTH {
+		var sha_ctx C.SHA256_CTX
+		mdCtxSize = unsafe.Sizeof(sha_ctx)
+	} else if mdSize == C.SHA384_DIGEST_LENGTH || mdSize == C.SHA512_DIGEST_LENGTH {
+		var sha_ctx C.SHA512_CTX
+		mdCtxSize = unsafe.Sizeof(sha_ctx)
+	}
+	return int(mdCtxSize)
+}
+
+func (ctx *hmacCtx) mdData() []byte {
+	outlen := ctx.getMdCtxSize()
+	outbuf := make([]byte, outlen)
+	md_ctx := ctx.evpMdCtx()
+	slice := &reflect.SliceHeader{Data: uintptr(md_ctx.md_data), Len: int(outlen), Cap: int(outlen)}
+	rbuf := *(*[]byte)(unsafe.Pointer(slice))
+	copy(outbuf, rbuf)
+	return outbuf[:len(outbuf)]
+}
+
+func (ctx *hmacCtx) setMdData(pmd []byte) {
+	outlen := ctx.getMdCtxSize()
+	md_ctx := ctx.evpMdCtx()
+	slice := &reflect.SliceHeader{Data: uintptr(md_ctx.md_data), Len: int(outlen), Cap: int(outlen)}
+	rbuf := *(*[]byte)(unsafe.Pointer(slice))
+	copy(rbuf, pmd)
+}
+
+func HmacInit(d string, e *Engine, key []byte) (HmacCtx, error) {
+	return hmacInit(d, e, key)
+}
+
+func (ctx *hmacCtx) HmacUpdate(data []byte) error {
+	fmt.Println("Hash Context Size: ", ctx.getMdCtxSize())
+	if 1 != C.HMAC_Update(ctx.hmacContext(), (*C.uchar)(&data[0]), C.size_t(len(data))) {
 		return fmt.Errorf("failed hmac update")
 	}
 
 	return nil
 }
 
+func (ctx *hmacCtx) HmacUpdateEx(data, pmd []byte) ([]byte, error) {
+	if pmd != nil {
+		//fmt.Println("Setting intermediate hash")
+		ctx.setMdData(pmd)
+	}
+	if 1 != C.HMAC_Update(ctx.hmacContext(), (*C.uchar)(&data[0]), C.size_t(len(data))) {
+		return nil, fmt.Errorf("failed hmac update")
+	}
+
+	return ctx.mdData(), nil
+}
+
 func (ctx *hmacCtx) HmacFinal() ([]byte, error) {
-	outbuf := make([]byte, C.EVP_MD_size_not_a_macro(ctx.mdContext()))
+	outbuf := make([]byte, C.EVP_MD_size(ctx.evpMd()))
 	outlen := C.uint(len(outbuf))
 	if 1 != C.HMAC_Final(ctx.hmacContext(), (*C.uchar)(&outbuf[0]), &outlen) {
 		return nil, fmt.Errorf("failed hmac final")

@@ -19,20 +19,10 @@ package openssl
 import (
 	"encoding/hex"
 	"encoding/json"
-	"strings"
 	"testing"
 )
 
-func expectError(t *testing.T, err error, msg string) {
-	if err == nil {
-		t.Fatalf("Expected error containing %#v, but got none", msg)
-	}
-	if !strings.Contains(err.Error(), msg) {
-		t.Fatalf("Expected error containing %#v, but got %s", msg, err)
-	}
-}
-
-func checkEqual(t *testing.T, output, original string) {
+func checkEqualString(t *testing.T, output, original string) {
 	if output != original {
 		t.Fatalf("output != original! %#v != %#v", output, original)
 	}
@@ -42,8 +32,6 @@ func TestHMAC(t *testing.T) {
 	key := []byte("012345678")
 	plaintext1 := "hello world"
 
-	t.Log("TestHMAC")
-
 	ctx, err := HmacInit("SHA1", nil, key)
 	if err != nil {
 		t.Fatal("Could not get hmac context: ", err)
@@ -58,36 +46,48 @@ func TestHMAC(t *testing.T) {
 		t.Fatal("HmacFinal() failure: ", err)
 	}
 	hmachex := hex.EncodeToString(hmac)
-	checkEqual(t, hmachex, "e19e220122b37b708bfb95aca2577905acabf0c0")
+	checkEqualString(t, hmachex, "e19e220122b37b708bfb95aca2577905acabf0c0")
 }
 
-func TestHMACMultiblock(t *testing.T) {
-	key := []byte("012345678")
-	plaintext1 := "hello world"
-	plaintext2 := "hello world again"
+func TestHMACVectorsMultipart(t *testing.T) {
+	algo := []string{"sha1", "sha256", "sha384", "sha512"}
+	var testVector []interface{}
+	json.Unmarshal(([]byte)(hashTestVectorsMultipart), &testVector)
+	for _, a := range algo {
+		for _, test := range testVector {
+			m := test.(map[string]interface{})
+			key := m["key"].(string)
+			data1 := m["data1"].(string)
+			data2 := m["data2"].(string)
 
-	t.Log("TestHMAC")
+			ctx, err := HmacInit(a, nil, []byte(key))
+			if err != nil {
+				t.Fatal("Could not get hmac context: ", err)
+			}
 
-	ctx, err := HmacInit("SHA1", nil, key)
-	if err != nil {
-		t.Fatal("Could not get hmac context: ", err)
-	}
+			imd, err := ctx.HmacUpdateEx([]byte(data1), nil)
+			if err != nil {
+				t.Fatal("HmacUpdate(plaintext1) failure: ", err)
+			}
 
-	err = ctx.HmacUpdate([]byte(plaintext1))
-	if err != nil {
-		t.Fatal("HmacUpdate(plaintext1) failure: ", err)
-	}
-	err = ctx.HmacUpdate([]byte(plaintext2))
-	if err != nil {
-		t.Fatal("HmacUpdate(plaintext1) failure: ", err)
-	}
+			ctx, err = HmacInit(a, nil, []byte(key))
+			if err != nil {
+				t.Fatal("Could not get hmac context: ", err)
+			}
 
-	hmac, err := ctx.HmacFinal()
-	if err != nil {
-		t.Fatal("HmacFinal() failure: ", err)
+			_, err = ctx.HmacUpdateEx([]byte(data2), imd)
+			if err != nil {
+				t.Fatal("HmacUpdate(plaintext1) failure: ", err)
+			}
+			hmac, err := ctx.HmacFinal()
+			if err != nil {
+				t.Fatal("HmacFinal() failure: ", err)
+			}
+			hmachex := hex.EncodeToString(hmac)
+			//t.Log(hmachex)
+			checkEqualString(t, hmachex, m[a].(string))
+		}
 	}
-	hmachex := hex.EncodeToString(hmac)
-	checkEqual(t, hmachex, "ae80942e9790594ba0074308a58c524e97617f66")
 }
 
 func TestHMACVectors(t *testing.T) {
@@ -115,10 +115,22 @@ func TestHMACVectors(t *testing.T) {
 				t.Fatal("HmacFinal() failure: ", err)
 			}
 			hmachex := hex.EncodeToString(hmac)
-			checkEqual(t, hmachex, m[a].(string))
+			checkEqualString(t, hmachex, m[a].(string))
 		}
 	}
 }
+
+var hashTestVectorsMultipart = `[
+  {
+	"key" : "012345678",
+	"data1" : "hello world",
+	"data2" : "hello world again",
+	"sha1" : "ae80942e9790594ba0074308a58c524e97617f66",
+	"sha256" : "2cf1b0095941f6821b333be8fbec57ccda65113915d6288da6e00b0c7e1fcabd",
+	"sha384" : "cbe5e006212f6514ea20b03a16118eebf879cf3139b949f23bec170ffd54a95e83de85c78261d9b46c163d260ec84951",
+	"sha512" : "492d7b7a927a9ac1f50379aa4631893048039ae8644147a2f2bc32993297518c591175e8d112c194d7a5357836d992bc245f8293f939cca35a3b19a18970057b"
+  }
+]`
 
 var hashTestVectors = `[
   {
