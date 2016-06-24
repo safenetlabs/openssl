@@ -28,25 +28,30 @@ func checkEqualString(t *testing.T, output, original string) {
 	}
 }
 
+func checkNotEqualString(t *testing.T, output, original string) {
+	if output == original {
+		t.Fatalf("output != original! %#v != %#v", output, original)
+	}
+}
+
 func TestHMAC(t *testing.T) {
 	key := []byte("012345678")
-	plaintext1 := "hello world"
+	data := []byte("hello world")
 
-	ctx, err := HmacInit("SHA1", nil, key)
+	hmac, err := HMAC("SHA1", key, data)
 	if err != nil {
-		t.Fatal("Could not get hmac context: ", err)
-	}
-
-	err = ctx.HmacUpdate([]byte(plaintext1))
-	if err != nil {
-		t.Fatal("HmacUpdate(plaintext1) failure: ", err)
-	}
-	hmac, err := ctx.HmacFinal()
-	if err != nil {
-		t.Fatal("HmacFinal() failure: ", err)
+		t.Fatal("HMAC() failure: ", err)
 	}
 	hmachex := hex.EncodeToString(hmac)
 	checkEqualString(t, hmachex, "e19e220122b37b708bfb95aca2577905acabf0c0")
+
+	key = []byte("012345670")
+	hmac, err = HMAC("SHA1", key, data)
+	if err != nil {
+		t.Fatal("HMAC() failure: ", err)
+	}
+	hmachex = hex.EncodeToString(hmac)
+	checkNotEqualString(t, hmachex, "e19e220122b37b708bfb95aca2577905acabf0c0")
 }
 
 func TestHMACVectorsMultipart(t *testing.T) {
@@ -60,26 +65,26 @@ func TestHMACVectorsMultipart(t *testing.T) {
 			data1 := m["data1"].(string)
 			data2 := m["data2"].(string)
 
-			ctx, err := HmacInit(a, nil, []byte(key))
+			ctx, err := HMAC_Init(a, nil, []byte(key))
 			if err != nil {
 				t.Fatal("Could not get hmac context: ", err)
 			}
 
-			imd, err := ctx.HmacUpdateEx([]byte(data1), nil)
+			imd, err := ctx.HMAC_Update_ex([]byte(data1), nil)
 			if err != nil {
 				t.Fatal("HmacUpdate(plaintext1) failure: ", err)
 			}
 
-			ctx, err = HmacInit(a, nil, []byte(key))
+			ctx, err = HMAC_Init(a, nil, []byte(key))
 			if err != nil {
 				t.Fatal("Could not get hmac context: ", err)
 			}
 
-			_, err = ctx.HmacUpdateEx([]byte(data2), imd)
+			_, err = ctx.HMAC_Update_ex([]byte(data2), imd)
 			if err != nil {
 				t.Fatal("HmacUpdate(plaintext1) failure: ", err)
 			}
-			hmac, err := ctx.HmacFinal()
+			hmac, err := ctx.HMAC_Final()
 			if err != nil {
 				t.Fatal("HmacFinal() failure: ", err)
 			}
@@ -100,17 +105,17 @@ func TestHMACVectors(t *testing.T) {
 			key, _ := hex.DecodeString(m["key"].(string))
 			plaintext1, _ := hex.DecodeString(m["data"].(string))
 
-			ctx, err := HmacInit(a, nil, key)
+			ctx, err := HMAC_Init(a, nil, key)
 			if err != nil {
 				t.Fatal("Could not get hmac context: ", err)
 			}
 
-			err = ctx.HmacUpdate(plaintext1)
+			err = ctx.HMAC_Update(plaintext1)
 			if err != nil {
 				t.Fatal("HmacUpdate(plaintext1) failure: ", err)
 			}
 
-			hmac, err := ctx.HmacFinal()
+			hmac, err := ctx.HMAC_Final()
 			if err != nil {
 				t.Fatal("HmacFinal() failure: ", err)
 			}

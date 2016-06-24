@@ -35,10 +35,29 @@ type hmacCtxSt struct {
 	hCtx *C.HMAC_CTX
 }
 
+type hmacCtx struct {
+	*hmacCtxSt
+}
+
+type HmacCtx interface {
+	HMAC_Update(data []byte) error
+	HMAC_Update_ex(data, pmd []byte) ([]byte, error)
+	HMAC_Final() ([]byte, error)
+	hmacContext() *C.HMAC_CTX
+	evpMd() *C.EVP_MD
+	evpMdCtx() *C.EVP_MD_CTX
+	mdData() []byte
+	setMdData(pmd []byte)
+	getMdCtxSize() int
+}
+
+// Following the memory allocation/free pattern used elsewhere
+// within spacemonkey lib
 func newHmacCtx() (*hmacCtxSt, error) {
 	//fmt.Println("allocating hmac context")
 	var ptr C.HMAC_CTX
 	hctx := (*C.HMAC_CTX)(C.malloc(C.size_t(unsafe.Sizeof(ptr))))
+
 	C.HMAC_CTX_init(hctx)
 	if hctx == nil {
 		return nil, fmt.Errorf("failed to allocate hmac context")
@@ -46,15 +65,15 @@ func newHmacCtx() (*hmacCtxSt, error) {
 	hctx.md_ctx.md_data = nil
 	ctx := &hmacCtxSt{hctx}
 	runtime.SetFinalizer(ctx, func(ctx *hmacCtxSt) {
-		//fmt.Println("Freeing hmac context")
+		//fmt.Println("Cleanup hmac context")
 		C.HMAC_CTX_cleanup(ctx.hCtx)
+		if ctx.hCtx != nil {
+			//fmt.Println("Freeing hmac context")
+			C.free(unsafe.Pointer(ctx.hCtx))
+		}
 	})
 
 	return ctx, nil
-}
-
-type hmacCtx struct {
-	*hmacCtxSt
 }
 
 func hmacInit(name string, e *Engine, key []byte) (*hmacCtx, error) {
@@ -76,18 +95,6 @@ func hmacInit(name string, e *Engine, key []byte) (*hmacCtx, error) {
 	keyLen := C.int(len(key))
 	C.HMAC_Init_ex(ctx.hCtx, keyBytes, keyLen, md, eptr)
 	return &hmacCtx{hmacCtxSt: ctx}, nil
-}
-
-type HmacCtx interface {
-	HmacUpdate(data []byte) error
-	HmacUpdateEx(data, pmd []byte) ([]byte, error)
-	HmacFinal() ([]byte, error)
-	hmacContext() *C.HMAC_CTX
-	evpMd() *C.EVP_MD
-	evpMdCtx() *C.EVP_MD_CTX
-	mdData() []byte
-	setMdData(pmd []byte)
-	getMdCtxSize() int
 }
 
 func (ctx *hmacCtx) hmacContext() *C.HMAC_CTX {
@@ -136,12 +143,11 @@ func (ctx *hmacCtx) setMdData(pmd []byte) {
 	copy(rbuf, pmd)
 }
 
-func HmacInit(d string, e *Engine, key []byte) (HmacCtx, error) {
+func HMAC_Init(d string, e *Engine, key []byte) (HmacCtx, error) {
 	return hmacInit(d, e, key)
 }
 
-func (ctx *hmacCtx) HmacUpdate(data []byte) error {
-	fmt.Println("Hash Context Size: ", ctx.getMdCtxSize())
+func (ctx *hmacCtx) HMAC_Update(data []byte) error {
 	if 1 != C.HMAC_Update(ctx.hmacContext(), (*C.uchar)(&data[0]), C.size_t(len(data))) {
 		return fmt.Errorf("failed hmac update")
 	}
@@ -149,10 +155,10 @@ func (ctx *hmacCtx) HmacUpdate(data []byte) error {
 	return nil
 }
 
-func (ctx *hmacCtx) HmacUpdateEx(data, pmd []byte) ([]byte, error) {
-	if pmd != nil {
+func (ctx *hmacCtx) HMAC_Update_ex(data, imd []byte) ([]byte, error) {
+	if imd != nil {
 		//fmt.Println("Setting intermediate hash")
-		ctx.setMdData(pmd)
+		ctx.setMdData(imd)
 	}
 	if 1 != C.HMAC_Update(ctx.hmacContext(), (*C.uchar)(&data[0]), C.size_t(len(data))) {
 		return nil, fmt.Errorf("failed hmac update")
@@ -161,14 +167,36 @@ func (ctx *hmacCtx) HmacUpdateEx(data, pmd []byte) ([]byte, error) {
 	return ctx.mdData(), nil
 }
 
-func (ctx *hmacCtx) HmacFinal() ([]byte, error) {
+func (ctx *hmacCtx) HMAC_Final() ([]byte, error) {
 	outbuf := make([]byte, C.EVP_MD_size(ctx.evpMd()))
 	outlen := C.uint(len(outbuf))
 	if 1 != C.HMAC_Final(ctx.hmacContext(), (*C.uchar)(&outbuf[0]), &outlen) {
 		return nil, fmt.Errorf("failed hmac final")
 	}
-	// Force garbage collection
+	// Force garbage collection?
 	runtime.GC()
+
+	return outbuf[:outlen], nil
+}
+
+func HMAC(d string, key, data []byte) ([]byte, error) {
+	// Get EVP_MD for the given algorithm name
+	cname := C.CString(d)
+	defer C.free(unsafe.Pointer(cname))
+	md := C.EVP_get_digestbyname(cname)
+	if md == nil {
+		return nil, fmt.Errorf("Digest %v not found", d)
+	}
+
+	// Allocate out buffer
+	outbuf := make([]byte, C.EVP_MD_size(md))
+	outlen := C.uint(len(outbuf))
+
+	keyBytes := (unsafe.Pointer)(&key[0])
+	keyLen := C.int(len(key))
+	if nil == C.HMAC(md, keyBytes, keyLen, (*C.uchar)(&data[0]), C.size_t(len(data)), (*C.uchar)(&outbuf[0]), &outlen) {
+		return nil, fmt.Errorf("failed to create hmac")
+	}
 
 	return outbuf[:outlen], nil
 }
