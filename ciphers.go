@@ -330,8 +330,15 @@ func NewDecryptionCipherCtx(c *Cipher, e *Engine, key, iv []byte) (
 func (ctx *encryptionCipherCtx) EncryptUpdate(input []byte) ([]byte, error) {
 	outbuf := make([]byte, len(input)+ctx.BlockSize())
 	outlen := C.int(len(outbuf))
+	var in *C.uchar
+	if len(input) > 0 {
+		in = (*C.uchar)(&input[0])
+	} else {
+		in = nil
+	}
+
 	res := C.EVP_EncryptUpdate(ctx.ctx, (*C.uchar)(&outbuf[0]), &outlen,
-		(*C.uchar)(&input[0]), C.int(len(input)))
+		in, C.int(len(input)))
 	if res != 1 {
 		return nil, fmt.Errorf("failed to encrypt [result %d]", res)
 	}
