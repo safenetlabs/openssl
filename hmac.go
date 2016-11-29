@@ -194,6 +194,9 @@ func HMAC(d string, key, data []byte) ([]byte, error) {
 
 	keyBytes := (unsafe.Pointer)(&key[0])
 	keyLen := C.int(len(key))
+	if len(data) == 0 {
+		return nil, fmt.Errorf("no data to process")
+	}
 	if nil == C.HMAC(md, keyBytes, keyLen, (*C.uchar)(&data[0]), C.size_t(len(data)), (*C.uchar)(&outbuf[0]), &outlen) {
 		return nil, fmt.Errorf("failed to create hmac")
 	}
